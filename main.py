@@ -1,10 +1,13 @@
 from tkinter import *
 from tkinter import ttk
 import random
+from cqcalendar import CQCalendar
 
 def process_cmd(play_screen, cmd):
 	try:
 		cmd_dict[cmd](play_screen, cmd)
+		
+		play_screen.game.inc_time()
 		
 		discovered_locations = play_screen.game.update_characters()
 		play_screen.update_screen()
@@ -24,6 +27,15 @@ def move_cmd(play_screen, cmd):
 	except AttributeError:
 		pass
 		
+def shop_cmd(play_screen, cmd):
+	game = play_screen.game
+	player = game.player
+	
+	location = game.locations.get((player.x, player.y))
+	
+	if location is not None and location.location_type in ["Town", "Village"]:
+		ShopPopup(play_screen.root, location)
+		
 cmd_dict = {
 	"up": move_cmd,
 	"northwest": move_cmd,
@@ -33,6 +45,7 @@ cmd_dict = {
 	"southeast": move_cmd,
 	"left": move_cmd,
 	"right": move_cmd,
+	"shop": shop_cmd,
 }
 
 class Root(Tk):
@@ -53,6 +66,8 @@ class PlayScreen(ttk.Frame):
 		
 		self.game = game
 		
+		self.calendar = game.calendar
+		
 		self.player = player = game.player
 		
 		left_fr = ttk.Frame(self)
@@ -63,6 +78,17 @@ class PlayScreen(ttk.Frame):
 		
 		right_fr = ttk.Frame(self)
 		right_fr.pack(side=LEFT, fill=BOTH, expand=1)
+		
+		#Calendar
+		self.time_var = StringVar(value=f"Time: {self.calendar.time_string()}")
+		
+		time_lbl = ttk.Label(right_fr, textvariable=self.time_var, anchor="center")
+		time_lbl.pack(fill=X)
+		
+		self.date_var = StringVar(value=f"Date: {self.calendar.date_string()}")
+		
+		date_lbl = ttk.Label(right_fr, textvariable=self.date_var, anchor="center")
+		date_lbl.pack(fill=X)
 		
 		#Location
 		self.location_var = StringVar(value=f"Location: {player.x},{player.y}")
@@ -98,12 +124,20 @@ class PlayScreen(ttk.Frame):
 		root.bind("<Right>", lambda event:process_cmd(self, "right"))
 		root.bind("6", lambda event:process_cmd(self, "right"))
 		
+		root.bind("5", lambda event: process_cmd(self, "shop"))
+		
 		self.update_screen()
 		
 	def update_screen(self):
+		self.update_calendar()
+		
 		self.update_location()
 		
 		self.status_fr.update_frame()
+		
+	def update_calendar(self):
+		self.time_var.set(f"Time: {self.calendar.time_string()}")
+		self.date_var.set(f"Date: {self.calendar.date_string()}")
 		
 	def update_location(self):
 		player = self.player
@@ -413,7 +447,11 @@ class CreateMapPopup(Popup):
 	def __init__(self, root):
 		super().__init__(root)
 		
-		self.player = root.game.player
+		self.root = root
+		
+		self.game = game = root.game
+		
+		self.player = player = game.player
 		
 		if not self.player.known_locations:
 			lbl = ttk.Label(self, text="You must discover a location before you can create a map!", anchor="center")
@@ -431,22 +469,224 @@ class CreateMapPopup(Popup):
 			)
 			
 			location_names = [
-				f"{location.name} ({location.location_type}) {location.x, {location.y}}" for location in self.locations
+				f"{location.name} ({location.location_type}) {location.x, location.y}" for location in self.locations
 			]
 			
-			self.location_cbx = ttk.Combobox(self, textvariable=self.location_var, values=location_names, state="readonly",)
+			max_length = max(len(name) for name in location_names)
+			
+			self.location_cbx = ttk.Combobox(self, textvariable=self.location_var, values=location_names, state="readonly", width=max_length)
 			self.location_cbx.pack(fill=X, padx=10, pady=10)
 			
 			if location_names:
 				self.location_cbx.current(0)
 				
 			self.create_btn = ttk.Button(self, text="Create Map", command=self.create_map)
-			self.create_btn.pack(padx=10, pady=10)
+			self.create_btn.pack(fill=X, pady=(10, 0))
+			
+			self.cancel_btn = ttk.Button(self, text="Cancel", command=self.destroy)
+			self.cancel_btn.pack(fill=X)
 			
 		self.center()
 		
 	def create_map(self):
+		root = self.root
+		game = self.game
+		player = self.player
+		
+		index = self.location_cbx.current()
+		
+		location = self.locations[index]
+		
+		game.create_map(player, location)
+		
+		game.inc_time()
+		
+		root.play_screen.update_screen()
+		
 		self.destroy()
+		
+class ReadMapPopup(Popup):
+	def __init__(self, root, map_obj):
+		super().__init__(root)
+		
+		self.map_obj = map_obj
+		
+		name_lbl = ttk.Label(self, text=f"Location Name: {map_obj.location_name}", anchor="center")
+		name_lbl.pack()
+		
+		type_lbl = ttk.Label(self, text=f"Location Type: {map_obj.location_type}", anchor="center")
+		type_lbl.pack()
+		
+		coors_lbl = ttk.Label(self, text=f"Coordinates: ({map_obj.x},{map_obj.y})", anchor="center")
+		coors_lbl.pack()
+		
+		cartographer_lbl = ttk.Label(self, text=f"Cartographer: {map_obj.cartographer_name}", anchor="center")
+		cartographer_lbl.pack()
+		
+		ok_btn = ttk.Button(self, text="OK", command=self.destroy)
+		ok_btn.pack()
+		
+		self.center()
+		
+class ShopPopup(Popup):
+	def __init__(self, root, location):
+		super().__init__(root)
+		
+		self.root = root
+		self.game = game = root.game
+		self.player = player = game.player
+		
+		location_lbl = ttk.Label(self, text=location.name, anchor="center")
+		location_lbl.pack(fill=X)
+		
+		self.gold_var = StringVar(value=f"Gold: {player.gold}")
+		
+		gold_lbl = ttk.Label(self, textvariable=self.gold_var, anchor="center")
+		gold_lbl.pack(fill=X)
+		
+		self.shop_nb = ShopNotebook(self, root, location)
+		self.shop_nb.pack(fill=BOTH, expand=1)
+		
+		ok_btn = ttk.Button(self, text="OK", command=self.destroy)
+		ok_btn.pack(fill=X)
+		
+		self.center()
+		
+	def update_popup(self):
+		self.gold_var.set(f"Gold: {self.player.gold}")
+		
+class ShopNotebook(ttk.Notebook):
+	def __init__(self, parent, root, location):
+		super().__init__(parent)
+		
+		self.parent = parent
+		self.root = root
+		self.location = location
+		
+		self.tabs = {
+			"Buy": BuyTab(self),
+			"Sell": SellTab(self),
+		}
+		
+		for tab_name, tab in self.tabs.items():
+			self.add(tab, text=tab_name)
+			
+	def update_tabs(self):
+		self.parent.update_popup()
+		
+		for tab in self.tabs.values():
+			try:
+				tab.update_tab()
+			
+			except AttributeError:
+				pass
+		
+class BuyTab(ttk.Frame):
+	def __init__(self, parent):
+		super().__init__(parent)
+		
+		self.shop_nb = parent
+		self.location = parent.location
+		self.root = parent.root
+		self.game = self.root.game
+		self.player = self.game.player
+		
+		self.grid = MapTradeGrid(self, self.location.maps)
+		self.grid.pack(fill=BOTH, expand=1)
+		
+		buy_btn = ttk.Button(self, text="Buy Map", command=self.buy_map)
+		buy_btn.pack(fill=X)
+		
+	def buy_map(self):
+		map_obj = self.grid.get_selected_map()
+		
+		if map_obj is None:
+			return
+			
+		success = self.game.buy_map(self.player, self.location, map_obj)
+		
+		if success:
+			self.root.play_screen.update_screen()
+			self.shop_nb.update_tabs()
+		
+	def update_tab(self):
+		self.grid.populate_maps()
+		
+class SellTab(ttk.Frame):	
+	def __init__(self, parent):
+		super().__init__(parent)
+		
+		self.shop_nb = parent
+		self.location = parent.location
+		self.root = parent.root
+		self.game = self.root.game
+		self.player = self.game.player
+		
+		self.grid = MapTradeGrid(self, self.player.maps)
+		self.grid.pack(fill=BOTH, expand=1)
+		
+		sell_btn = ttk.Button(self, text="Sell Map", command=self.sell_map)
+		sell_btn.pack(fill=X)
+		
+	def sell_map(self):
+		map_obj = self.grid.get_selected_map()
+		
+		if map_obj is None:
+			return
+			
+		success = self.game.sell_map(self.player, self.location, map_obj)
+		
+		if success:
+			self.root.play_screen.update_screen()
+			self.shop_nb.update_tabs()
+			
+	def update_tab(self):
+		self.grid.populate_maps()
+		
+class MapTradeGrid(ttk.Treeview):
+	def __init__(self, parent, maps):
+		columns = ("name", "type", "cartographer", "price")
+		
+		super().__init__(parent, columns=columns, show="headings")
+		
+		self.maps = maps
+		
+		self.heading("name", text="Name")
+		self.heading("type", text="Type")
+		self.heading("cartographer", text="Cartographer")
+		self.heading("price", text="Price")
+		
+		for col in columns:
+			self.column(col, width=120, anchor="center", stretch=True)
+			
+		self.populate_maps()
+		
+	def populate_maps(self):
+		for row in self.get_children():
+			self.delete(row)
+			
+		for index, map_obj in enumerate(self.maps):
+			self.insert(
+				"",
+				"end",
+				iid=str(index),
+				values=(
+					map_obj.location_name,
+					map_obj.location_type,
+					map_obj.cartographer_name,
+					map_obj.price,
+				)
+			)
+			
+	def get_selected_map(self):
+		selected = self.selection()
+		
+		if not selected:
+			return None
+			
+		index = int(selected[0])
+		
+		return self.maps[index]
 		
 class StatusFrame(ttk.Frame):
 	def __init__(self, parent, root, game):
@@ -465,6 +705,8 @@ class StatusFrame(ttk.Frame):
 		self.status_nb.pack(fill=BOTH, expand=1)
 		
 	def update_frame(self):
+		self.gold_var.set(f"Gold: {self.player.gold}")
+		
 		self.status_nb.update_tabs()
 		
 class StatusNotebook(ttk.Notebook):
@@ -478,6 +720,7 @@ class StatusNotebook(ttk.Notebook):
 		self.tabs = {
 			"Cartography": CartographyTab(self, root, game),
 			"Locations": LocationsTab(self, root, game),
+			"Maps": MapsTab(self, root, game),
 		}
 		
 		for tab_name, tab in self.tabs.items():
@@ -521,7 +764,7 @@ class LocationsTab(ttk.Frame):
 		locations = sorted(self.player.known_locations.values(), key=lambda location: location.name)
 		
 		for location in locations:
-			lbl = ttk.Label(self.scrollable_fr.scrolling_frame, text=f"{location.name} ({location.location_type}) {location.x}, {location.y}", anchor="center")
+			lbl = ttk.Label(self.scrollable_fr.scrolling_frame, text=f"{location.name} ({location.location_type}) ({location.x}, {location.y})", anchor="center")
 			lbl.pack(fill=X)
 			
 class CartographyTab(ttk.Frame):
@@ -537,11 +780,52 @@ class CartographyTab(ttk.Frame):
 		cartography_lbl = ttk.Label(self, textvariable=self.cartography_var, anchor="center")
 		cartography_lbl.pack(fill=X)
 		
+		self.cartography_xp_var = StringVar(value=f"Cartography XP: {self.player.cartography_xp} / {(self.player.cartography_xp + 1) * 100}")
+		
+		cartography_xp_lbl = ttk.Label(self, textvariable=self.cartography_xp_var, anchor="center")
+		cartography_xp_lbl.pack(fill=X)
+		
 		self.create_map_btn = ttk.Button(self, text="Create Map", command=lambda:CreateMapPopup(root))
 		self.create_map_btn.pack(pady=10)
 		
 	def update_tab(self):
 		self.cartography_var.set(f"Cartography Level: {self.player.cartography_lvl}")
+		self.cartography_xp_var.set(f"Cartography XP: {self.player.cartography_xp} / {(self.player.cartography_xp + 1) * 100}")
+class MapsTab(ttk.Frame):
+	def __init__(self, parent, root, game):
+		super().__init__(parent)
+		
+		self.root = root
+		self.game = game
+		self.player = player = game.player
+		
+		self.scrollable_fr = ScrollableFrame(self)
+		self.scrollable_fr.pack(fill=BOTH, expand=1)
+		
+	def update_tab(self):
+		self.update_maps()
+		
+	def update_maps(self):
+		for widget in self.scrollable_fr.scrolling_frame.winfo_children():
+			widget.destroy()
+			
+		for map_item in self.player.maps:
+			map_fr = MapFrame(self.scrollable_fr.scrolling_frame, self.root, map_item)
+			map_fr.pack(fill=X)
+			
+class MapFrame(ttk.Frame):
+	def __init__(self, parent, root, map_obj):
+		super().__init__(parent)
+		
+		self.root = root
+		self.game = game = root.game
+		
+		lbl = ttk.Label(self, text=f"{map_obj.location_name} ({map_obj.location_type})", anchor="center")
+		lbl.pack(side=LEFT, fill=X, expand=1)
+		
+		self.read_btn = ttk.Button(self, text="Read", command=lambda:ReadMapPopup(root, map_obj))
+		self.read_btn.pack(side=RIGHT)
+		
 		
 class ScrollableFrame(ttk.Frame):
 	def __init__(self, parent):
@@ -600,6 +884,8 @@ class ScrollableFrame(ttk.Frame):
 class Game:
 	def __init__(self):
 		self.world_size = 300
+		
+		self.calendar = CQCalendar()
 		
 		self.location_num = max(1, int(self.world_size * .30))
 		
@@ -738,6 +1024,8 @@ class Game:
 		
 		self.generate_cartographers()
 		
+		self.generate_shop_maps()
+		
 		self.discover_nearby_locations(self.player)
 		
 	def random_character_placement(self, character):
@@ -805,6 +1093,77 @@ class Game:
 			self.cartographers.append(cartographer)
 			
 			self.characters.append(cartographer)
+			
+	def create_map(self, character, location):
+		x = location.x
+		y = location.y
+		
+		skill_check = character.cartography_skill_check()
+		
+		if not skill_check:
+			x = random.randint(0, self.world_size - 1)
+			y = random.randint(0, self.world_size - 1)
+			
+		map = Map(
+			location.name,
+			location.location_type,
+			x,
+			y,
+			character.name,
+			price = character.cartography_lvl
+		)
+		
+		character.maps.append(map)
+		
+		character.gain_cartography_xp()
+		
+	def buy_map(self, buyer, settlement, map_obj):
+		if buyer.gold < map_obj.price:
+			return False
+			
+		buyer.gold -= map_obj.price
+			
+		settlement.maps.remove(map_obj)
+		buyer.maps.append(map_obj)
+		
+		return True
+		
+	def sell_map(self, seller, settlement, map_obj):
+		if map_obj not in seller.maps:
+			return False
+			
+		seller.gold += map_obj.price
+			
+		seller.maps.remove(map_obj)
+		
+		settlement.maps.append(map_obj)
+		
+		return True
+		
+	def generate_shop_maps(self):
+		settlements = [
+			location for location in self.locations.values() if location.location_type in ["Town", "Village"]
+		]
+		
+		if not settlements:
+			return
+			
+		for cartographer in self.cartographers:
+			for i in range(5):
+				location = random.choice(list(self.locations.values()))
+				settlement = random.choice(settlements)
+				
+				self.create_map(cartographer, location)
+				
+				if cartographer.maps:
+					map_obj = cartographer.maps[-1]
+					
+					cartographer.maps.remove(map_obj)
+					
+					settlement.maps.append(map_obj)
+		
+	def inc_time(self, ticks=60):
+		self.calendar.update(ticks=ticks)
 		
 class Location:
 	def __init__(self, name, location_type, x, y):
@@ -817,8 +1176,12 @@ class Location:
 		self.x = x
 		self.y = y
 		
+		self.maps = []
+		
 class Character:
 	def __init__(self):
+		self.name = "Character"
+		
 		self.x = 0
 		self.y = 0
 		
@@ -830,9 +1193,33 @@ class Character:
 		
 		self.cartography_lvl = 1
 		
+		self.cartography_xp = 0
+		
+		self.maps = []
+		
+	def cartography_skill_check(self):
+		if random.randint(1, 100) <= self.cartography_lvl:
+			return True
+			
+		else:
+			return False
+			
+	def gain_cartography_xp(self):
+		xp_gain = random.randint(1, self.cartography_lvl)
+		
+		self.cartography_xp += xp_gain
+		
+		xp_needed = (self.cartography_lvl + 1) * 100
+		
+		if self.cartography_xp >= xp_needed:
+			self.cartography_xp -= xp_needed
+			self.cartography_lvl += 1
+		
 class Player(Character):
 	def __init__(self):
 		super().__init__()
+		
+		self.name = "Player"
 		
 class NPC(Character):
 	def __init__(self, name):
@@ -843,7 +1230,7 @@ class NPC(Character):
 		self.cartography_lvl = random.randint(1, 100)
 		
 class Map:
-	def __init__(self, location_name, location_type, x, y, cartographer_name):
+	def __init__(self, location_name, location_type, x, y, cartographer_name, price=1):
 		self.location_name = location_name
 		
 		self.location_type = location_type
@@ -852,6 +1239,8 @@ class Map:
 		self.y = y
 		
 		self.cartographer_name = cartographer_name
+		
+		self.price = price
 		
 if __name__ == "__main__":
 	root = Root()
