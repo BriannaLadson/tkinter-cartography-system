@@ -1,6 +1,9 @@
 # tkinter-cartography-system
 A sandbox-style cartography simulation written in Python and Tkinter.
 
+<img width="1366" height="768" alt="Screenshot (670)" src="https://github.com/user-attachments/assets/2f333120-0a5f-47e3-85f8-a259e8ba9229" />
+
+
 This project is a vertical slice exploring how cartography can function as a gameplay system rather than a simple map screen.
 
 ***
